@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "work-session-manager"
+version = "0.1.0"
+description = "A local-first CLI for intentional work sessions."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+wsm = "wsm.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
