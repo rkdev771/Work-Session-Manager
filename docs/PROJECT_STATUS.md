@@ -64,4 +64,6 @@ Before editing for Phase 2:
 
 ## Repository status
 
-Git has not yet been initialized for this project.
+Git is initialized, and the local `main` branch tracks `origin/main`.
+
+GitHub repository: <https://github.com/rkdev771/Work-Session-Manager>
