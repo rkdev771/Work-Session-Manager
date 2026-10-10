@@ -1,6 +1,16 @@
 # Work Session Manager Project Status
 
-Last updated: 2026-09-13
+Last updated: 2026-10-10
+
+## Workflow migration
+
+Migration is underway on `workflow/matt-skills`. Collaboration rules are in
+`CODEX_WORKFLOW.md`; the existing specifications remain authoritative until
+replacement verification and user approval. Preparation changes are ready for
+the pre-commit checkpoint. The next step is the user's explicit invocation of
+Matt's setup skill, followed by a separate re-grill session. No app-behavior
+answers have been agreed during preparation. Source code and tests have not
+changed during migration.
 
 ## Current phase
 
@@ -87,9 +97,9 @@ The project-local virtual environment uses Python 3.14.7. The project declares s
 - Validation is an explicit method called at serialization boundaries rather than automatic dataclass construction validation.
 - Structural validation belongs to Phase 2; timestamp ordering, overlap detection, and duration consistency remain deferred to Phase 4.
 
-## Next checkpoint
+## Previous storage checkpoint
 
-Before editing for Phase 3:
+Preserve these unresolved storage questions when generating replacement tickets:
 
 1. Inspect the repository and reread the governing documents.
 2. Reconcile the original single `active_session.json` layout with the amended requirement to persist multiple `CREATED` and `PAUSED` sessions.

@@ -4,18 +4,45 @@
 
 Build Work Session Manager v0.1 through incremental pair programming. Codex acts as an experienced engineer and tutor; the user retains control of the project and learns how its major components work.
 
-`MVP_SPEC.md` contains the frozen product requirements. Do not add, remove, reinterpret, or expand them. If a proposed change would alter v0.1, stop and surface it for discussion about a future version. The collaboration workflow may evolve independently of the frozen product specification.
+`MVP_SPEC.md` and `WSM v0.1 Multi-Session Amendment.md` contain the product requirements; the amendment takes precedence where they conflict. Keep amended v0.1 unchanged unless the re-grill reveals a discrepancy with the user's intended product and the user explicitly approves a change. Surface unresolved specification conflicts before implementation. The collaboration workflow may evolve independently of the product specification.
 
 By the end of v0.1, the user should be able to explain every major component, even if Codex wrote a significant percentage of the code.
 
 ## Work in small, understandable steps
 
 - Do not generate the entire application in one pass.
-- Work on one phase at a time and one conceptual unit at a time within that phase.
-- Start with Phase 1 only. Inspect the repository and explain the recommended structure before editing. Begin implementation once the Phase 1 approach is agreed.
-- Do not automatically advance into later phases. Leave room for questions, review, and learning checkpoints.
+- Work on one agreed ticket at a time, delivering a small, complete user flow through the necessary parts of the application.
+- Inspect the repository and explain the recommended approach before editing. Agree on the current ticket and leave room for questions, review, and learning checkpoints before starting another.
 - Keep each incremental step runnable and testable.
 - Include tests throughout implementation rather than leaving them until the end.
+
+## Migration collaboration rules
+
+These rules supersede the historical phase sequence below.
+
+- Use Matt Pocock's skills within the agreed ticket scope. Prefer `implement` for individual tickets; whole-spec concurrent implementation requires a separate user decision.
+- Agree on public testing boundaries before adding tests. Use the existing standard-library testing tools; introduce tooling only for a demonstrated need and with the required approval.
+- Before every commit, present the concrete diff, explain the meaningful changes, report verification results and any remaining concerns, and wait for the user's explicit approval to commit. This applies to migration documentation as well as implementation and overrides automatic commits in skills.
+- Retain the original specifications and `PROJECT_STATUS.md` until their requirements, decisions, and unfinished work have been checked against the approved replacements. Only then switch authority and retire old documents.
+- Keep the replacement specification and individual ticket files in the repository, without tracker statuses or labels. Adapt Matt's specification and ticket workflows to write these files directly; omit issue-tracker setup and publishing. Choose their paths when drafting the replacements and point to a single authoritative specification.
+
+## Migration sequence
+
+1. Finish and review the collaboration-instruction changes on the migration branch. The pre-migration reference is commit `40285527fcb209e95c0266bb5b5178807a516f41`; the baseline suite has 27 passing tests.
+2. Wait for the user to invoke Matt's setup skill. Preserve the no-tracker decision when adapting setup; review its concrete configuration draft before writing. Use a single domain context and create glossary entries or ADRs only when they have useful content.
+3. After setup, hold a separate re-grill session. Reserve app-behavior questions for that session. No product answers were settled during migration preparation.
+4. Generate one replacement specification from the agreed requirements and decisions, then draft and review small tickets for unfinished work. Preserve completed work rather than ticketing it again.
+5. Before switching authority, account for every original requirement, amendment rule, meaningful implementation decision, and deferred task. Map each to the replacement spec, a warranted domain document, existing code/tests, or an explicitly approved supersession. Review this mapping with the user without creating a permanent duplicate requirements document.
+6. After preservation verification and approval, update all authority pointers together and retire the superseded specifications, this workflow document, and `PROJECT_STATUS.md` from active documentation. Git retains their history. Keep collaboration rules in a concise `AGENTS.md` and run the existing tests before the pre-commit checkpoint.
+
+The preservation check must cover the amended command surface and transitions,
+single-ACTIVE invariant, UUID identities and selectors, UTC timestamp authority,
+prompt timestamp/cancellation behavior, JSON schema and derived state, duration
+arithmetic and clock errors, safe persistence and archival, required validation
+and tests, and all v0.1 exclusions. Preserve the rationale and deferred work in
+`PROJECT_STATUS.md`, including the boundary between structural validation and
+future timing validation. Implementation choices are context, not additional
+product requirements.
 
 ## Explain before and after implementation
 
@@ -53,7 +80,7 @@ Stop and explain before making a change that materially alters how the system wo
 
 Examples include changing the storage format, introducing SQLite, adding dependencies, changing CLI commands or timing behavior, adding features, or altering frozen requirements.
 
-Do not silently introduce these changes. Do not change v0.1 requirements; surface product changes as future-version discussions.
+Do not silently introduce these changes. During the re-grill, surface discrepancies with the user's intended product and obtain an explicit decision before changing v0.1. Otherwise keep the amended requirements unchanged.
 
 Challenge suggestions that would worsen the architecture or conflict with the spec. Explain the reason and recommend a simpler approach.
 
@@ -77,13 +104,13 @@ When the user asks Codex to implement an agreed component, actually implement it
 
 Prefer straightforward Python and the standard library. Avoid unnecessary abstractions, dependencies, frameworks, and enterprise patterns.
 
-Refactor only when justified by the current implementation. Do not prematurely create many layers for a five-command CLI.
+Refactor only when justified by the current implementation. Keep module boundaries proportionate to this small CLI.
 
 Do not introduce feature creep: no analytics, history commands, GUI, configuration systems, or other features outside the frozen spec.
 
-## Implementation sequence
+## Historical implementation sequence
 
-The phases organize implementation; they do not add to or replace the product requirements in `MVP_SPEC.md`.
+Phases 1 and 2 are complete. The sequence below records the previous plan; it is not the current execution order. Its single-session commands and storage assumptions must be read subject to the multi-session amendment. Replacement tickets will cover only the unfinished work.
 
 ### Phase 1 — Project skeleton
 

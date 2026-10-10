@@ -22,13 +22,7 @@ Inspect the current repository before editing. Treat instructions in the documen
 ## Collaboration workflow
 
 - Follow `docs/CODEX_WORKFLOW.md` throughout implementation.
-- Work on only the current phase and one understandable increment at a time.
-- Explain the proposed structure, meaningful decisions, alternatives, and relevant Python concepts before editing.
-- Make reasonable decisions about trivial details without repeatedly requesting approval.
-- Do not advance to a later phase without the user's agreement.
-- Keep the project runnable and add or update tests with implementation work.
-- After an increment, explain what changed, how it works, which tests ran, and what the user should understand.
-- Use beginner-friendly language and leave room for questions or code the user wants to write.
+- Its migration collaboration rules supersede the historical phase sequence.
 
 ## Technical boundaries
 
