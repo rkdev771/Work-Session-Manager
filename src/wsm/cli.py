@@ -73,13 +73,20 @@ def handle_start(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_pause(_args: argparse.Namespace) -> int:
-    """Handle the pause command."""
+def handle_pause(args: argparse.Namespace) -> int:
+    """Capture before input and persist only an unchanged ACTIVE target."""
+    store = SessionStore()
+    pending = store.capture_pause(clock=args.clock)
+    reason = _prompt_required("Pause reason")
+    session = store.commit_pause(pending, reason)
+    print(f"Paused session: {session.name}.")
     return 0
 
 
-def handle_resume(_args: argparse.Namespace) -> int:
-    """Handle the resume command."""
+def handle_resume(args: argparse.Namespace) -> int:
+    """Resume a PAUSED selection and report after successful persistence."""
+    session = SessionStore().resume(args.session, clock=args.clock)
+    print(f"Resumed session: {session.name}.")
     return 0
 
 
@@ -112,7 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
     pause_parser = subparsers.add_parser("pause", help="Pause the current session.")
     pause_parser.set_defaults(handler=handle_pause)
 
-    resume_parser = subparsers.add_parser("resume", help="Resume the current session.")
+    resume_parser = subparsers.add_parser("resume", help="Resume a selected paused session.")
     resume_parser.add_argument("session", help="Session selector.")
     resume_parser.set_defaults(handler=handle_resume)
 

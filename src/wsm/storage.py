@@ -7,15 +7,25 @@ import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
 from wsm.clock import Clock, ClockError, capture_time
-from wsm.session import Durations, Session, SessionState
+from wsm.session import Durations, Pause, Session, SessionState
 
 
 class StorageError(Exception):
     """A storage operation could not safely complete."""
+
+
+@dataclass(frozen=True, kw_only=True)
+class PendingPause:
+    """An unsaved candidate bound to a UUID and its original saved bytes."""
+
+    session_id: UUID
+    timestamp: datetime
+    saved_record: bytes
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -105,6 +115,75 @@ class SessionStore:
             raise
         except (OSError, ValueError) as error:
             raise StorageError(f"Could not start session: {error}") from error
+
+    def capture_pause(self, *, clock: Clock | None = None) -> PendingPause:
+        """Capture time at entry and release store access before user input."""
+        timestamp = capture_time(clock)
+        try:
+            with self._access():
+                sessions = self._unfinished_inventory()
+                active = next((session for session in sessions
+                               if session.state is SessionState.ACTIVE), None)
+                if active is None:
+                    raise StorageError("No active session to pause.")
+                active.durations(timestamp)
+                path = self.root / "unfinished" / f"{active.id}.json"
+                return PendingPause(session_id=active.id, timestamp=timestamp,
+                                    saved_record=path.read_bytes())
+        except ClockError:
+            raise
+        except (OSError, ValueError) as error:
+            raise StorageError(f"Could not prepare pause: {error}") from error
+
+    def commit_pause(self, pending: PendingPause, reason: str) -> Session:
+        """Save only if the UUID's record is unchanged since capture."""
+        try:
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError("Pause reason must contain nonwhitespace text.")
+            with self._access():
+                sessions = self._unfinished_inventory()
+                selected = next((session for session in sessions
+                                 if session.id == pending.session_id), None)
+                path = self.root / "unfinished" / f"{pending.session_id}.json"
+                if (selected is None or path.read_bytes() != pending.saved_record
+                        or selected.state is not SessionState.ACTIVE):
+                    raise StorageError("Session changed while pause input was pending. Run wsm pause again.")
+                selected.durations(pending.timestamp)
+                selected.pauses.append(Pause(started_at=pending.timestamp,
+                                             ended_at=None, reason=reason.strip()))
+                selected.validate_timing()
+                self._write_json(path, selected.to_dict())
+                return selected
+        except ClockError:
+            raise
+        except (OSError, ValueError) as error:
+            raise StorageError(f"Could not pause session: {error}") from error
+
+    def resume(self, selector: str | None, *, clock: Clock | None = None) -> Session:
+        """Validate and close the selected open pause under one store lock."""
+        try:
+            with self._access():
+                sessions = self._unfinished_inventory()
+                selected = self._resolve_selector(selector, sessions)
+                if selected.state is SessionState.CREATED:
+                    raise StorageError("This session has not started. Use wsm start instead.")
+                if selected.state is not SessionState.PAUSED:
+                    raise StorageError("Only PAUSED sessions can be resumed.")
+                active = next((session for session in sessions
+                               if session.state is SessionState.ACTIVE), None)
+                if active is not None:
+                    raise StorageError(f"An ACTIVE session already exists: {active.name}. Pause or close it first.")
+                timestamp = capture_time(clock)
+                selected.durations(timestamp)
+                selected.pauses[-1].ended_at = timestamp
+                selected.validate_timing()
+                self._write_json(self.root / "unfinished" / f"{selected.id}.json",
+                                 selected.to_dict())
+                return selected
+        except ClockError:
+            raise
+        except (OSError, ValueError) as error:
+            raise StorageError(f"Could not resume session: {error}") from error
 
     def status(self, *, clock: Clock | None = None) -> StatusSnapshot:
         """Read status without rewriting records or listing selectors."""
