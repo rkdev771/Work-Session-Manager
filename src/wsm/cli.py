@@ -5,6 +5,7 @@ import sys
 from collections.abc import Sequence
 from uuid import uuid4
 
+from wsm.clock import Clock, ClockError
 from wsm.session import Session
 from wsm.storage import SessionStore, StorageError
 
@@ -38,13 +39,37 @@ def handle_sessions(_args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_status(_args: argparse.Namespace) -> int:
-    """Handle the status command."""
+def _format_duration(seconds: int) -> str:
+    """Format elapsed seconds without wrapping hours at a day boundary."""
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+
+def handle_status(args: argparse.Namespace) -> int:
+    """Display a single saved ACTIVE snapshot or unfinished state counts."""
+    snapshot = SessionStore().status(clock=args.clock)
+    if snapshot.active is None:
+        print("No active session.")
+        print(f"PAUSED: {snapshot.paused_count}")
+        print(f"CREATED: {snapshot.created_count}")
+        return 0
+    session = snapshot.active
+    durations = snapshot.durations
+    print(f"Title: {session.name}")
+    print(f"Goal: {session.goal}")
+    print(f"State: {session.state.value}")
+    print(f"Started: {session.started_at.astimezone().isoformat(sep=' ', timespec='seconds')}")
+    print(f"Active: {_format_duration(durations.active_seconds)}")
+    print(f"Paused: {_format_duration(durations.paused_seconds)}")
+    print(f"Total elapsed: {_format_duration(durations.total_seconds)}")
     return 0
 
 
-def handle_start(_args: argparse.Namespace) -> int:
-    """Handle the start command."""
+def handle_start(args: argparse.Namespace) -> int:
+    """Start a CREATED selection and report only after persistence succeeds."""
+    session = SessionStore().start(args.session, clock=args.clock)
+    print(f"Started session: {session.name}.")
     return 0
 
 
@@ -98,10 +123,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, *, clock: Clock | None = None) -> int:
     """Run the command-line interface."""
     parser = build_parser()
     args = parser.parse_args(argv)
+    args.clock = clock
 
     if not hasattr(args, "handler"):
         parser.print_help()
@@ -112,6 +138,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (KeyboardInterrupt, EOFError):
         print("\nCommand cancelled.", file=sys.stderr)
         return 1
-    except StorageError as error:
+    except (StorageError, ClockError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1

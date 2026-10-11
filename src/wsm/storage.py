@@ -6,14 +6,26 @@ import os
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
-from wsm.session import Session, SessionState
+from wsm.clock import Clock, ClockError, capture_time
+from wsm.session import Durations, Session, SessionState
 
 
 class StorageError(Exception):
     """A storage operation could not safely complete."""
+
+
+@dataclass(frozen=True, kw_only=True)
+class StatusSnapshot:
+    """A consistent inventory and calculated ACTIVE status for one command."""
+
+    active: Session | None
+    durations: Durations | None
+    paused_count: int
+    created_count: int
 
 
 def _unique_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -65,32 +77,80 @@ class SessionStore:
     def resolve_selector(self, text: str | None) -> Session:
         """Resolve the saved number without rebuilding or guessing selectors."""
         try:
+            with self._access():
+                return self._resolve_selector(text, self._unfinished_inventory())
+        except OSError as error:
+            raise StorageError(f"Could not resolve selector: {error} Run wsm sessions.") from error
+
+    def start(self, selector: str | None, *, clock: Clock | None = None) -> Session:
+        """Resolve, validate, capture time and persist under one store lock."""
+        try:
+            with self._access():
+                sessions = self._unfinished_inventory()
+                selected = self._resolve_selector(selector, sessions)
+                if selected.state is SessionState.PAUSED:
+                    raise StorageError("This session is PAUSED. Use wsm resume instead.")
+                if selected.state is not SessionState.CREATED:
+                    raise StorageError("Only CREATED sessions can be started; this session has already started.")
+                active = next((session for session in sessions
+                               if session.state is SessionState.ACTIVE), None)
+                if active is not None:
+                    raise StorageError(f"An ACTIVE session already exists: {active.name}. Pause or close it first.")
+                selected.started_at = capture_time(clock)
+                selected.validate_timing()
+                self._write_json(self.root / "unfinished" / f"{selected.id}.json",
+                                 selected.to_dict())
+                return selected
+        except ClockError:
+            raise
+        except (OSError, ValueError) as error:
+            raise StorageError(f"Could not start session: {error}") from error
+
+    def status(self, *, clock: Clock | None = None) -> StatusSnapshot:
+        """Read status without rewriting records or listing selectors."""
+        try:
+            with self._access():
+                sessions = self._unfinished_inventory()
+                active = next((session for session in sessions
+                               if session.state is SessionState.ACTIVE), None)
+                durations = active.durations(capture_time(clock)) if active is not None else None
+                return StatusSnapshot(
+                    active=active, durations=durations,
+                    paused_count=sum(session.state is SessionState.PAUSED for session in sessions),
+                    created_count=sum(session.state is SessionState.CREATED for session in sessions),
+                )
+        except ClockError:
+            raise
+        except (OSError, ValueError) as error:
+            raise StorageError(f"Could not read status: {error}") from error
+
+    def _resolve_selector(self, text: str | None, sessions: list[Session]) -> Session:
+        """Resolve against an inventory while the caller holds store access."""
+        try:
             if not isinstance(text, str) or not text.isascii() or not text.isdecimal():
                 raise ValueError("A positive numeric selector is required.")
             number = str(int(text))
             if int(number) <= 0:
                 raise ValueError("A positive numeric selector is required.")
-            with self._access():
-                mapping = self._read_json(self.root / "selectors.json")
-                if not isinstance(mapping, dict):
-                    raise ValueError("The selector mapping must be an object.")
-                identities = set()
-                for key, value in mapping.items():
-                    if not key.isascii() or not key.isdecimal() or int(key) <= 0 or str(int(key)) != key:
-                        raise ValueError("Invalid number in selector mapping.")
-                    if not isinstance(value, str):
-                        raise ValueError("Invalid identity in selector mapping.")
-                    identity = UUID(value)
-                    if identity.version != 4 or str(identity) != value or value in identities:
-                        raise ValueError("Invalid or duplicate identity in selector mapping.")
-                    identities.add(value)
-                if number not in mapping:
-                    raise ValueError(f"Selector {number} is unavailable.")
-                sessions = self._unfinished_inventory()
-                for session in sessions:
-                    if str(session.id) == mapping[number]:
-                        return session
-                raise ValueError(f"Selector {number} points to a missing or CLOSED session.")
+            mapping = self._read_json(self.root / "selectors.json")
+            if not isinstance(mapping, dict):
+                raise ValueError("The selector mapping must be an object.")
+            identities = set()
+            for key, value in mapping.items():
+                if not key.isascii() or not key.isdecimal() or int(key) <= 0 or str(int(key)) != key:
+                    raise ValueError("Invalid number in selector mapping.")
+                if not isinstance(value, str):
+                    raise ValueError("Invalid identity in selector mapping.")
+                identity = UUID(value)
+                if identity.version != 4 or str(identity) != value or value in identities:
+                    raise ValueError("Invalid or duplicate identity in selector mapping.")
+                identities.add(value)
+            if number not in mapping:
+                raise ValueError(f"Selector {number} is unavailable.")
+            for session in sessions:
+                if str(session.id) == mapping[number]:
+                    return session
+            raise ValueError(f"Selector {number} points to a missing or CLOSED session.")
         except StorageError as error:
             raise StorageError(f"{error} Run wsm sessions.") from error
         except (OSError, ValueError) as error:
@@ -100,6 +160,7 @@ class SessionStore:
     def _load_session(path: Path) -> Session:
         try:
             session = Session.from_dict(SessionStore._read_json(path))
+            session.validate_timing()
             if path.name != f"{session.id}.json":
                 raise ValueError("Session identity does not match its filename.")
             if session.state is SessionState.CLOSED:
