@@ -1,16 +1,40 @@
 """Command-line interface for Work Session Manager."""
 
 import argparse
+import sys
 from collections.abc import Sequence
+from uuid import uuid4
+
+from wsm.session import Session
+from wsm.storage import SessionStore, StorageError
+
+
+def _prompt_required(label: str) -> str:
+    """Retry blank input, leaving cancellation to the command boundary."""
+    while True:
+        value = input(f"{label}: ").strip()
+        if value:
+            return value
+        print(f"{label} must contain nonwhitespace text.")
 
 
 def handle_create(_args: argparse.Namespace) -> int:
-    """Handle the create command."""
+    """Prompt for and persist a session without starting it."""
+    name = _prompt_required("Title")
+    goal = _prompt_required("Goal")
+    session = Session(id=uuid4(), name=name, goal=goal)
+    SessionStore().save_created(session)
+    print(f"Created session: {session.name}. Run wsm sessions to obtain a selector.")
     return 0
 
 
 def handle_sessions(_args: argparse.Namespace) -> int:
-    """Handle the sessions command."""
+    """Refresh selectors and display saved unfinished sessions."""
+    listing = SessionStore().refresh_selectors()
+    if not listing:
+        print("No unfinished sessions.")
+    for number, session in listing:
+        print(f"{number}  {session.name}  {session.state.value}")
     return 0
 
 
@@ -83,4 +107,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    return args.handler(args)
+    try:
+        return args.handler(args)
+    except (KeyboardInterrupt, EOFError):
+        print("\nCommand cancelled.", file=sys.stderr)
+        return 1
+    except StorageError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1

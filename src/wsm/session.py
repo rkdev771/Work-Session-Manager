@@ -49,6 +49,8 @@ def _datetime_from_json(value: str | None) -> datetime | None:
     """Convert an optional ISO 8601 JSON value into a datetime."""
     if value is None:
         return None
+    if not isinstance(value, str):
+        raise ValueError("Stored timestamps must be ISO 8601 strings or null.")
     return datetime.fromisoformat(value)
 
 
@@ -94,9 +96,14 @@ class Pause:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Pause":
+    def from_dict(cls, data: object) -> "Pause":
         """Build a pause from JSON-compatible Python data."""
         try:
+            if not isinstance(data, dict):
+                raise ValueError("Pause data must be an object.")
+            required = {"started_at", "ended_at", "reason"}
+            if not required <= data.keys() or data.keys() - required - {"duration_seconds"}:
+                raise ValueError("Pause fields do not match the stored schema.")
             pause = cls(
                 started_at=_datetime_from_json(data["started_at"]),
                 ended_at=_datetime_from_json(data["ended_at"]),
@@ -200,6 +207,8 @@ class Session:
         if self.ended_at is None:
             if any(value is not None for value in closing_values):
                 raise ValueError("A non-closed session cannot contain closing data.")
+            if any(pause.duration_seconds is not None for pause in self.pauses):
+                raise ValueError("Unfinished pauses cannot contain duration counters.")
             return
 
         if open_pause_indexes:
@@ -244,13 +253,32 @@ class Session:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Session":
+    def from_dict(cls, data: object) -> "Session":
         """Build a session from JSON-compatible Python data."""
+        if not isinstance(data, dict):
+            raise ValueError("Session data must be an object.")
         schema_version = data.get("schema_version")
-        if schema_version != SCHEMA_VERSION:
+        if type(schema_version) is not int or schema_version != SCHEMA_VERSION:
             raise ValueError(f"Unsupported schema version: {schema_version!r}")
 
         try:
+            required = {"schema_version", "id", "name", "goal", "started_at", "pauses"}
+            if data.get("ended_at") is not None:
+                required |= {
+                    "ended_at", "active_duration_seconds", "paused_duration_seconds",
+                    "total_duration_seconds", "goal_completed", "notes",
+                }
+            if data.keys() != required:
+                raise ValueError("Session fields do not match the stored schema.")
+            if not isinstance(data["id"], str):
+                raise ValueError("Session id must be a UUIDv4 string.")
+            if not isinstance(data["pauses"], list):
+                raise ValueError("Session pauses must be an array.")
+            if data.get("ended_at") is None and any(
+                isinstance(pause, dict) and "duration_seconds" in pause
+                for pause in data["pauses"]
+            ):
+                raise ValueError("Unfinished pauses cannot contain duration counters.")
             session = cls(
                 id=UUID(data["id"]),
                 name=data["name"],
