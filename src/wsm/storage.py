@@ -29,6 +29,15 @@ class PendingPause:
 
 
 @dataclass(frozen=True, kw_only=True)
+class PendingClose:
+    """An unsaved end time bound to the original UUID and saved bytes."""
+
+    session_id: UUID
+    timestamp: datetime
+    saved_record: bytes
+
+
+@dataclass(frozen=True, kw_only=True)
 class StatusSnapshot:
     """A consistent inventory and calculated ACTIVE status for one command."""
 
@@ -159,6 +168,68 @@ class SessionStore:
         except (OSError, ValueError) as error:
             raise StorageError(f"Could not pause session: {error}") from error
 
+    def capture_close(self, selector: str | None = None, *, clock: Clock | None = None) -> PendingClose:
+        """Capture at entry, then release storage access before prompting."""
+        timestamp = capture_time(clock)
+        try:
+            with self._access():
+                sessions = self._unfinished_inventory()
+                if selector is None:
+                    selected = next((session for session in sessions
+                                     if session.state is SessionState.ACTIVE), None)
+                    if selected is None:
+                        raise StorageError("No active session to close.")
+                else:
+                    selected = self._resolve_selector(selector, sessions)
+                if selected.state is not SessionState.ACTIVE:
+                    raise StorageError("Only ACTIVE sessions can be closed in this version.")
+                selected.durations(timestamp)
+                path = self.root / "unfinished" / f"{selected.id}.json"
+                return PendingClose(session_id=selected.id, timestamp=timestamp,
+                                    saved_record=path.read_bytes())
+        except ClockError:
+            raise
+        except (OSError, ValueError) as error:
+            raise StorageError(f"Could not prepare close: {error}") from error
+
+    def commit_close(self, pending: PendingClose, goal_completed: bool, notes: str) -> Session:
+        """Archive a complete record before cleanup, only for unchanged input."""
+        try:
+            if not isinstance(goal_completed, bool) or not isinstance(notes, str):
+                raise ValueError("Closing answers require boolean goal completion and string notes.")
+            with self._access():
+                sessions = self._unfinished_inventory()
+                selected = next((session for session in sessions
+                                 if session.id == pending.session_id), None)
+                path = self.root / "unfinished" / f"{pending.session_id}.json"
+                if (selected is None or path.read_bytes() != pending.saved_record
+                        or selected.state is not SessionState.ACTIVE):
+                    raise StorageError("Session changed while close input was pending. Run wsm close again.")
+                durations = selected.durations(pending.timestamp)
+                selected.ended_at = pending.timestamp
+                selected.goal_completed = goal_completed
+                selected.notes = notes
+                selected.active_duration_seconds = durations.active_seconds
+                selected.paused_duration_seconds = durations.paused_seconds
+                selected.total_duration_seconds = durations.total_seconds
+                for pause in selected.pauses:
+                    pause.duration_seconds = int((pause.ended_at - pause.started_at).total_seconds())
+                selected.validate_timing()
+                data = selected.to_dict()
+                archive = self.root / "sessions" / path.name
+                if archive.exists():
+                    raise StorageError(f"Archive already exists: {archive}")
+                self._write_json(archive, data)
+                try:
+                    path.unlink()
+                except OSError as error:
+                    raise StorageError(f"Archive saved at {archive}, but unfinished cleanup failed: {error}") from error
+                return selected
+        except ClockError:
+            raise
+        except (OSError, ValueError) as error:
+            raise StorageError(f"Could not close session: {error}") from error
+
     def resume(self, selector: str | None, *, clock: Clock | None = None) -> Session:
         """Validate and close the selected open pause under one store lock."""
         try:
@@ -263,13 +334,41 @@ class SessionStore:
                 continue
             archive = self.root / "sessions" / path.name
             if archive.exists():
-                raise StorageError(f"Conflicting session copies: {path} and {archive}")
+                self._recover_active_close(path, archive)
+                continue
             sessions.append(self._load_session(path))
         active = [session for session in sessions if session.state is SessionState.ACTIVE]
         if len(active) > 1:
             filenames = ", ".join(f"{session.id}.json" for session in active)
             raise StorageError(f"Store contains multiple ACTIVE sessions: {filenames}")
         return sessions
+
+    def _recover_active_close(self, path: Path, archive: Path) -> None:
+        """Verify a duplicate under the inventory lock before removing it."""
+        try:
+            unfinished = self._load_session(path)
+            closed = Session.from_dict(self._read_json(archive))
+            closed.validate_timing()
+            if (unfinished.state is not SessionState.ACTIVE
+                    or closed.state is not SessionState.CLOSED
+                    or archive.name != f"{closed.id}.json"):
+                raise ValueError("Expected an ACTIVE copy and its CLOSED archive.")
+            prior = unfinished.to_dict()
+            completion = closed.to_dict()
+            # Closing adds only session closing fields and pause durations.
+            # Compare every original field, including the complete pause history.
+            completion["pauses"] = [
+                {key: value for key, value in pause.items() if key != "duration_seconds"}
+                for pause in completion["pauses"]
+            ]
+            if any(completion[key] != value for key, value in prior.items()):
+                raise ValueError("Archive does not complete the saved ACTIVE history.")
+        except (StorageError, ValueError) as error:
+            raise StorageError(f"Conflicting session copies: {path} and {archive}: {error}") from error
+        try:
+            path.unlink()
+        except OSError as error:
+            raise StorageError(f"Archive preserved at {archive}, but interrupted-close cleanup failed for {path}: {error}") from error
 
     def _ensure_directories(self) -> None:
         for name in ("unfinished", "sessions"):

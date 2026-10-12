@@ -90,8 +90,31 @@ def handle_resume(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_close(_args: argparse.Namespace) -> int:
-    """Handle the close command."""
+def _prompt_yes_no(label: str) -> bool:
+    """Retry invalid answers without recapturing the candidate timestamp."""
+    while True:
+        value = input(f"{label} [y/n]: ").strip().lower()
+        if value in ("y", "yes", "n", "no"):
+            return value in ("y", "yes")
+        print("Please answer y/yes or n/no.")
+
+
+def handle_close(args: argparse.Namespace) -> int:
+    """Collect accountability answers without holding storage access."""
+    store = SessionStore()
+    pending = store.capture_close(args.session, clock=args.clock)
+    if not _prompt_yes_no("Close this session?"):
+        print("Close cancelled.")
+        return 0
+    goal_completed = _prompt_yes_no("Did you accomplish your goal?")
+    notes = input("Notes (optional): ")
+    session = store.commit_close(pending, goal_completed, notes)
+    durations = session.durations()
+    print(f"Closed session: {session.name}.")
+    print(f"Goal completed: {'yes' if session.goal_completed else 'no'}")
+    print(f"Active: {_format_duration(durations.active_seconds)}")
+    print(f"Paused: {_format_duration(durations.paused_seconds)}")
+    print(f"Total elapsed: {_format_duration(durations.total_seconds)}")
     return 0
 
 
