@@ -147,7 +147,10 @@ def build_parser() -> argparse.ArgumentParser:
     resume_parser.set_defaults(handler=handle_resume)
 
     close_parser = subparsers.add_parser("close", help="Close a work session.")
-    close_parser.add_argument("session", nargs="?", help="Optional session selector.")
+    close_parser.add_argument(
+        "session", nargs="?",
+        help="Select an ACTIVE or PAUSED session; omit to close the ACTIVE session.",
+    )
     close_parser.set_defaults(handler=handle_close)
 
     return parser

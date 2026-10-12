@@ -181,8 +181,8 @@ class SessionStore:
                         raise StorageError("No active session to close.")
                 else:
                     selected = self._resolve_selector(selector, sessions)
-                if selected.state is not SessionState.ACTIVE:
-                    raise StorageError("Only ACTIVE sessions can be closed in this version.")
+                if selected.state not in (SessionState.ACTIVE, SessionState.PAUSED):
+                    raise StorageError("Only ACTIVE or PAUSED sessions can be closed.")
                 selected.durations(timestamp)
                 path = self.root / "unfinished" / f"{selected.id}.json"
                 return PendingClose(session_id=selected.id, timestamp=timestamp,
@@ -203,9 +203,11 @@ class SessionStore:
                                  if session.id == pending.session_id), None)
                 path = self.root / "unfinished" / f"{pending.session_id}.json"
                 if (selected is None or path.read_bytes() != pending.saved_record
-                        or selected.state is not SessionState.ACTIVE):
+                        or selected.state not in (SessionState.ACTIVE, SessionState.PAUSED)):
                     raise StorageError("Session changed while close input was pending. Run wsm close again.")
                 durations = selected.durations(pending.timestamp)
+                if selected.state is SessionState.PAUSED:
+                    selected.pauses[-1].ended_at = pending.timestamp
                 selected.ended_at = pending.timestamp
                 selected.goal_completed = goal_completed
                 selected.notes = notes
@@ -334,7 +336,7 @@ class SessionStore:
                 continue
             archive = self.root / "sessions" / path.name
             if archive.exists():
-                self._recover_active_close(path, archive)
+                self._recover_close(path, archive)
                 continue
             sessions.append(self._load_session(path))
         active = [session for session in sessions if session.state is SessionState.ACTIVE]
@@ -343,16 +345,16 @@ class SessionStore:
             raise StorageError(f"Store contains multiple ACTIVE sessions: {filenames}")
         return sessions
 
-    def _recover_active_close(self, path: Path, archive: Path) -> None:
+    def _recover_close(self, path: Path, archive: Path) -> None:
         """Verify a duplicate under the inventory lock before removing it."""
         try:
             unfinished = self._load_session(path)
             closed = Session.from_dict(self._read_json(archive))
             closed.validate_timing()
-            if (unfinished.state is not SessionState.ACTIVE
+            if (unfinished.state not in (SessionState.ACTIVE, SessionState.PAUSED)
                     or closed.state is not SessionState.CLOSED
                     or archive.name != f"{closed.id}.json"):
-                raise ValueError("Expected an ACTIVE copy and its CLOSED archive.")
+                raise ValueError("Expected an ACTIVE or PAUSED copy and its CLOSED archive.")
             prior = unfinished.to_dict()
             completion = closed.to_dict()
             # Closing adds only session closing fields and pause durations.
@@ -361,8 +363,15 @@ class SessionStore:
                 {key: value for key, value in pause.items() if key != "duration_seconds"}
                 for pause in completion["pauses"]
             ]
+            if unfinished.state is SessionState.PAUSED:
+                if (not completion["pauses"]
+                        or completion["pauses"][-1]["ended_at"] != completion["ended_at"]):
+                    raise ValueError("The open pause must end at the CLOSED session end.")
+                # Undo only the permitted new event for comparison; all prior
+                # pause starts, reasons and ends must still agree exactly.
+                completion["pauses"][-1]["ended_at"] = None
             if any(completion[key] != value for key, value in prior.items()):
-                raise ValueError("Archive does not complete the saved ACTIVE history.")
+                raise ValueError("Archive does not complete the saved session history.")
         except (StorageError, ValueError) as error:
             raise StorageError(f"Conflicting session copies: {path} and {archive}: {error}") from error
         try:
