@@ -29,13 +29,14 @@ def handle_create(_args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_sessions(_args: argparse.Namespace) -> int:
-    """Refresh selectors and display saved unfinished sessions."""
-    listing = SessionStore().refresh_selectors()
-    if not listing:
+def handle_sessions(args: argparse.Namespace) -> int:
+    """Refresh selectors and optionally append unnumbered CLOSED sessions."""
+    listing = SessionStore().refresh_selectors(include_closed=args.all)
+    if not any(number is not None for number, _ in listing):
         print("No unfinished sessions.")
     for number, session in listing:
-        print(f"{number}  {session.name}  {session.state.value}")
+        prefix = f"{number}  " if number is not None else ""
+        print(f"{prefix}{session.name}  {session.state.value}")
     return 0
 
 
@@ -130,6 +131,10 @@ def build_parser() -> argparse.ArgumentParser:
     create_parser.set_defaults(handler=handle_create)
 
     sessions_parser = subparsers.add_parser("sessions", help="List saved sessions.")
+    sessions_parser.add_argument(
+        "--all", action="store_true",
+        help="Append CLOSED sessions without numeric selectors.",
+    )
     sessions_parser.set_defaults(handler=handle_sessions)
 
     status_parser = subparsers.add_parser("status", help="Show the current session.")

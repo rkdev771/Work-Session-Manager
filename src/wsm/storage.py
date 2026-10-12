@@ -78,17 +78,24 @@ class SessionStore:
         except (OSError, ValueError) as error:
             raise StorageError(f"Could not save session {session.id}: {error}") from error
 
-    def refresh_selectors(self) -> list[tuple[int, Session]]:
-        """Persist compact selectors and return their unfinished listing."""
+    def refresh_selectors(self, *, include_closed: bool = False) -> list[tuple[int | None, Session]]:
+        """Refresh unfinished selectors, optionally appending unnumbered archives."""
         try:
             with self._access():
                 sessions = self._unfinished_inventory()
+                # Validate archives even when hidden, before replacing selectors.
+                closed = [self._load_session(path, closed=True)
+                          for path in (self.root / "sessions").iterdir()
+                          if path.suffix == ".json"]
                 sessions.sort(key=lambda session: (session.name, str(session.id)))
-                listing = list(enumerate(sessions, start=1))
+                listing: list[tuple[int | None, Session]] = list(enumerate(sessions, start=1))
                 self._write_json(
                     self.root / "selectors.json",
                     {str(number): str(session.id) for number, session in listing},
                 )
+                if include_closed:
+                    closed.sort(key=lambda session: (session.name, str(session.id)))
+                    listing.extend((None, session) for session in closed)
                 return listing
         except (OSError, ValueError) as error:
             raise StorageError(f"Could not list sessions: {error}") from error
@@ -309,13 +316,15 @@ class SessionStore:
             raise StorageError(f"Could not resolve selector: {error} Run wsm sessions.") from error
 
     @staticmethod
-    def _load_session(path: Path) -> Session:
+    def _load_session(path: Path, *, closed: bool = False) -> Session:
         try:
             session = Session.from_dict(SessionStore._read_json(path))
             session.validate_timing()
             if path.name != f"{session.id}.json":
                 raise ValueError("Session identity does not match its filename.")
-            if session.state is SessionState.CLOSED:
+            if closed and session.state is not SessionState.CLOSED:
+                raise ValueError("Only CLOSED records can be in archive storage.")
+            if not closed and session.state is SessionState.CLOSED:
                 raise ValueError("A CLOSED record cannot be in unfinished storage.")
             return session
         except (OSError, ValueError) as error:
@@ -349,11 +358,9 @@ class SessionStore:
         """Verify a duplicate under the inventory lock before removing it."""
         try:
             unfinished = self._load_session(path)
-            closed = Session.from_dict(self._read_json(archive))
-            closed.validate_timing()
+            closed = self._load_session(archive, closed=True)
             if (unfinished.state not in (SessionState.ACTIVE, SessionState.PAUSED)
-                    or closed.state is not SessionState.CLOSED
-                    or archive.name != f"{closed.id}.json"):
+                    or closed.state is not SessionState.CLOSED):
                 raise ValueError("Expected an ACTIVE or PAUSED copy and its CLOSED archive.")
             prior = unfinished.to_dict()
             completion = closed.to_dict()
