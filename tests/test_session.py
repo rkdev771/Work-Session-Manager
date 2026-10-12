@@ -225,6 +225,29 @@ class SessionTests(unittest.TestCase):
 
 
 class SessionValidationTests(unittest.TestCase):
+    def test_malformed_json_shapes_raise_value_error_at_public_boundary(self) -> None:
+        valid = make_session().to_dict()
+        invalid_records = [None, [], "session", 7]
+        for field, value in (
+            ("schema_version", True), ("schema_version", 1.0),
+            ("id", 12), ("id", None), ("pauses", {}),
+            ("pauses", [None]), ("pauses", [42]),
+            ("started_at", []), ("state", "CREATED"),
+            ("ended_at", None), ("total_duration_seconds", None),
+        ):
+            invalid_records.append({**valid, field: value})
+        for data in invalid_records:
+            with self.subTest(data=data):
+                with self.assertRaises(ValueError):
+                    Session.from_dict(data)
+
+    def test_pause_deserialization_rejects_non_objects_and_unknown_fields(self) -> None:
+        valid = Pause(started_at=PAUSED_AT, ended_at=None, reason="Lunch").to_dict()
+        for data in (None, [], 1, {**valid, "state": "PAUSED"}):
+            with self.subTest(data=data):
+                with self.assertRaises(ValueError):
+                    Pause.from_dict(data)
+
     def test_validation_runs_before_serialization(self) -> None:
         session = make_session(name="   ")
 
