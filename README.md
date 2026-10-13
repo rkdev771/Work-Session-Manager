@@ -6,37 +6,79 @@ the goal when you close it. Each command runs independently and exits.
 
 ## Installation
 
-The project declares **Python 3.10 or newer** and has no runtime dependencies.
-The current implementation requires a Unix platform with Python's `fcntl`
-file locking (for example, Linux or macOS); native Windows is not supported.
-The v0.1 verification environment used Python 3.14.7 on Linux. Other Python
-versions and macOS have not been verified in this ticket.
+WSM requires **Python 3.10 or newer** and Linux or macOS. Native Windows is
+not supported.
 
-From the repository directory:
+### Recommended: install with pipx
+
+This makes `wsm` available from any directory without activating an environment.
+Pipx keeps WSM in its own isolated Python environment.
+
+**1. Install pipx and Git**, if you do not already have them.
+
+Use your operating system's package manager. For example, on CachyOS or
+Arch Linux:
 
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
+sudo pacman -S python-pipx
+```
+
+See the [pipx installation guide](https://pipx.pypa.io/latest/how-to/install-pipx.html)
+for other installation options.
+
+**2. Download and install WSM:**
+
+```sh
+git clone https://github.com/rkdev771/Work-Session-Manager.git
+cd Work-Session-Manager
+pipx install .
+pipx ensurepath
+```
+
+If you already have the repository, enter its directory and run only the
+two `pipx` commands. These commands work in bash, zsh, and fish.
+
+**3. Open a new terminal**, then run:
+
+```sh
 wsm --help
 ```
 
-Installation uses setuptools as the build backend. Initial installation may
-need access to packaging tools; installed WSM commands require no network.
-The editable install means changes to `src/wsm/` are reflected without
-reinstalling. Activate the virtual environment in each new terminal, or invoke
-its executables by their full paths.
-
-Both entry points provide the same commands:
+You can now use `wsm` from any directory. To begin:
 
 ```sh
+wsm create
 wsm sessions
-python -m wsm sessions
 ```
 
-They work from any directory with the installed environment. Running `wsm`
-without arguments displays help. Use `wsm --help` or a command's `--help`,
-such as `wsm close --help`.
+Installation requires internet access; everyday WSM commands work offline.
+Your session data is stored in `~/.wsm`.
+
+### Updating WSM
+
+From your repository directory, download the latest code and replace the
+installed copy:
+
+```sh
+git pull --ff-only
+pipx uninstall work-session-manager
+pipx install .
+```
+
+Updating preserves your session data. Changes to the repository do not affect
+the installed copy until you reinstall.
+
+### Uninstalling WSM
+
+```sh
+pipx uninstall work-session-manager
+```
+
+This removes the application and its command, while keeping your session data
+in `~/.wsm`.
+
+Running `wsm` without arguments displays help. Use `wsm --help` or a command's
+`--help`, such as `wsm close --help`.
 
 ## A complete workflow
 
@@ -174,13 +216,63 @@ time after arbitrary manual clock changes. Detectably backward timestamps
 fail without saving the transition. Other clock changes can distort elapsed
 time without detection; this is an accepted v0.1 limitation.
 
+## Alternative: manage your own virtual environment
+
+Use this option if you want to activate WSM's environment yourself, or work on
+its source code. Both this option and pipx isolate WSM's Python environment.
+
+From the repository directory, create the environment:
+
+```sh
+python3 -m venv .venv
+```
+
+Activate it using the command for your shell.
+
+**Bash or zsh:**
+
+```sh
+. .venv/bin/activate
+```
+
+**Fish:**
+
+```fish
+source .venv/bin/activate.fish
+```
+
+Then install and check WSM:
+
+```sh
+python -m pip install -e .
+wsm --help
+```
+
+The editable install means changes to `src/wsm/` are reflected without
+reinstalling. Keep the repository at its current path. Activate the virtual
+environment in each new terminal, or invoke its executables by their full
+paths. Once activated, WSM works from any directory.
+
+Both entry points provide the same commands in this environment:
+
+```sh
+wsm sessions
+python -m wsm sessions
+```
+
 ## Verification
 
-After installing, run the standard-library suite:
+For development, install and activate the virtual environment described above,
+then run the standard-library suite from the repository directory:
 
 ```sh
 python -m unittest discover -s tests
 ```
+
+The project uses setuptools as its build backend and has no runtime
+dependencies. The current implementation uses Python's Unix-only `fcntl`
+file locking. The v0.1 verification environment used Python 3.14.7 on Linux;
+other Python versions and macOS have not been verified in this ticket.
 
 Tests use temporary stores and supplied times. Integration checks launch
 independent CLI processes; pipe barriers coordinate overlap without sleeping
