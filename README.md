@@ -16,8 +16,7 @@ Pipx keeps WSM in its own isolated Python environment.
 
 **1. Install pipx and Git**, if you do not already have them.
 
-Use your operating system's package manager. For example, on CachyOS or
-Arch Linux:
+Use your operating system's package manager. For example, on Arch Linux:
 
 ```sh
 sudo pacman -S python-pipx
